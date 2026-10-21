@@ -137,9 +137,21 @@ function render(){
  }
  else if(st.step==='hist'){
   a.innerHTML=`<button class="back" id="bk">← رجوع</button><h2>السجل</h2>`+
-  (hist.length?hist.slice(0,30).map(h=>`<div class="box" style="padding:12px"><b style="color:var(--gold2)">${h.date}</b> · ${esc(h.label)}<div class="sub">${h.rows.length} مجموعة</div></div>`).join('')+'<button class="btn" style="width:100%" id="dla">تحميل السجل الكامل Excel</button>':'<div class="sub">لسه مفيش تمارين متسجلة.</div>');
+  (hist.length?hist.map((h,n)=>`<div class="box hc" data-n="${n}" style="padding:12px;cursor:pointer"><b style="color:var(--gold2)">${h.date}</b> · ${esc(h.label)}<div class="sub">${h.rows.length} مجموعة · اضغط لعرض التفاصيل ‹</div></div>`).join('')+'<button class="btn" style="width:100%" id="dla">تحميل السجل الكامل Excel</button>':'<div class="sub">لسه مفيش تمارين متسجلة.</div>');
   $('bk').onclick=()=>go('home');
   if(hist.length)$('dla').onclick=()=>dl(today());
+  a.querySelectorAll('.hc').forEach(x=>x.onclick=()=>go('sess',{n:+x.dataset.n,del:false}));
+ }
+ else if(st.step==='sess'){
+  const s=hist[st.n];if(!s){go('hist');return}
+  const g={};s.rows.forEach(r=>(g[r.ex]=g[r.ex]||[]).push(r));
+  a.innerHTML=`<button class="back" id="bk">← رجوع للسجل</button><h2>${s.date}</h2><div class="sub" style="margin:-8px 0 14px">${esc(s.label)}</div>`+
+  Object.keys(g).map((k,i)=>`<div class="ex"><div class="exh"><div class="num">${i+1}</div><div class="exn">${esc(k)}</div></div>`+
+   g[k].map(r=>`<div class="set" style="grid-template-columns:60px 1fr 1fr"><div class="sl">سيت ${r.set}</div><div>${r.w||'-'} <span class="sl">كجم</span></div><div>${r.r||'-'} <span class="sl">عدة</span></div></div>`).join('')+'</div>').join('')+
+  `<div class="row"><button class="btn" id="d1">تحميل شيت اليوم ده</button><button class="btn o" id="dx">حذف التمرين</button></div>`;
+  $('bk').onclick=()=>go('hist');
+  $('d1').onclick=()=>dl(s.date,st.n);
+  $('dx').onclick=()=>{if(!st.del){st.del=true;$('dx').textContent='اضغط تاني للتأكيد';return}hist.splice(st.n,1);ls.set('il_hist',hist);go('hist')};
  }
 }
 function cmp(i,L){
@@ -160,8 +172,8 @@ function sheet(rows){
  const h=['التاريخ','اليوم','التمرين','المجموعة','الوزن (كجم)','التكرارات'];
  const ws=XLSX.utils.aoa_to_sheet([h].concat(rows));ws['!cols']=[{wch:12},{wch:22},{wch:30},{wch:10},{wch:12},{wch:12}];return ws;
 }
-function build(date){
-  const cur=hist.find(x=>x.date===date)||hist[0];
+function build(date,idx){
+  const cur=(idx!=null&&hist[idx])||hist.find(x=>x.date===date)||hist[0];
   const m=s=>s.rows.map(r=>[s.date,s.label,r.ex,r.set,r.w===''?'':+r.w,r.r===''?'':+r.r]);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,sheet(m(cur)),'جلسة اليوم');
@@ -170,9 +182,9 @@ function build(date){
   const buf=XLSX.write(wb,{bookType:'xlsx',type:'array'});
   return new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
-function dl(date){
+function dl(date,idx){
  try{
-  const u=URL.createObjectURL(build(date));
+  const u=URL.createObjectURL(build(date,idx));
   const a=document.createElement('a');a.href=u;a.download='workout_'+date+'.xlsx';
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(u),3000);
