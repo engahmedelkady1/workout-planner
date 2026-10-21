@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>سجل التمارين</title>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{--bg:#0a0708;--card:#161012;--card2:#1e1518;--wine:#7a1530;--wine2:#4a0c1c;--gold:#d4af37;--gold2:#f0d77a;--tx:#f3ece4;--mu:#a3949a;--ln:#33232a;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -62,6 +65,9 @@ th{color:var(--gold)}td:nth-child(1){direction:ltr;text-align:left}
 </div>
 <div id="bar"></div>
 <script>
+/* ===== الصق إعدادات Firebase بتاعتك هنا ===== */
+const CFG={apiKey:"AIzaSyBoQVjRJxTZniLu3jIsr_2Kag0b3XFogn8",authDomain:"workout-planner-8377f.firebaseapp.com",projectId:"workout-planner-8377f",appId:"1:445503159382:web:abc5853abdaa5cd6f54ff7"};
+/* ========================================== */
 const PLAN={
 d1:{t:'اليوم الأول',g:'u',ex:[['Incline Dumbbell Press',2],['T Bar Row Machine',2],['Iliac Lat Pulldown',2],['Chest Press Machine',2],['Lateral Raises',2],['Supported Dumbbell Curls',2],['Overhead Triceps Extension',2],['Abs Rope Crunches',2]]},
 d4:{t:'اليوم الرابع',g:'u',ex:[['Wide Grip Lat Pulldown',2],['Incline Press Machine',3],['Wide Grip Seated Row',2],['Reversed Curls',2],['Dumbbell Lateral Raise',2],['Zigzag Bar Tricep Extension',2],['Behind Body Curls',2],['Abs Rope Crunches',2]]},
@@ -72,20 +78,39 @@ const G={u:'الجسم العلوي · UPPER',l:'الجسم السفلي · LOWE
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-let hist=ls.get('il_hist',[]),custom=ls.get('il_custom',{}),email=ls.get('il_email','');
+let hist=[],custom={},email=ls.get('il_email',''),user=null,auth=null,fdb=null;
 let st={step:'home',g:null,day:null,cur:{},last:null};
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const exs=k=>PLAN[k].ex.concat(custom[k]||[]);
+async function persist(){
+ if(!user||!fdb)return;
+ try{await fdb.collection('users').doc(user.uid).set({hist:JSON.stringify(hist),custom:JSON.stringify(custom)})}
+ catch(e){toast('تعذر حفظ البيانات على السيرفر')}
+}
+const ERR={'auth/invalid-email':'الإيميل غير صحيح','auth/missing-password':'اكتب كلمة السر','auth/weak-password':'كلمة السر ضعيفة (6 حروف على الأقل)','auth/email-already-in-use':'الإيميل ده مسجل قبل كده','auth/invalid-credential':'الإيميل أو كلمة السر غلط','auth/user-not-found':'الحساب مش موجود','auth/wrong-password':'كلمة السر غلط','auth/too-many-requests':'محاولات كتيرة، استنى شوية','auth/network-request-failed':'مفيش اتصال بالإنترنت'};
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
 function go(s,p){Object.assign(st,p||{});st.step=s;render();window.scrollTo(0,0)}
 function lastOf(k,ex,si){const s=hist.find(h=>h.day===k);if(!s)return null;return s.rows.find(r=>r.ex===ex&&r.set===si+1)||null}
 function render(){
  const a=$('app'),b=$('bar');b.innerHTML='';
- if(st.step==='home'){
+ if(st.step==='auth'){
+  const reg=st.mode==='reg';
+  a.innerHTML=`<h2>${reg?'إنشاء حساب جديد':'تسجيل الدخول'}</h2><div class="box"><label>الإيميل</label><input id="ae" type="email" autocomplete="email"><label style="margin-top:12px">كلمة السر</label><input id="ap" type="password" autocomplete="${reg?'new-password':'current-password'}" placeholder="6 حروف على الأقل"><div id="er" class="dn" style="margin-top:10px;font-size:14px"></div></div><button class="btn" style="width:100%" id="ab2">${reg?'إنشاء الحساب':'دخول'}</button><div class="sub" style="text-align:center;margin-top:16px"><a id="tg" style="color:var(--gold);cursor:pointer">${reg?'عندي حساب؟ سجّل دخول':'مفيش حساب؟ أنشئ حساب جديد'}</a></div>`;
+  $('tg').onclick=()=>go('auth',{mode:reg?'login':'reg'});
+  if(!auth)$('er').textContent='لازم تلصق إعدادات Firebase في أول الكود الأول.';
+  $('ab2').onclick=async()=>{
+   if(!auth)return;const e=$('ae').value.trim(),p=$('ap').value;$('er').textContent='';$('ab2').disabled=true;
+   try{reg?await auth.createUserWithEmailAndPassword(e,p):await auth.signInWithEmailAndPassword(e,p)}
+   catch(x){$('er').textContent=ERR[x.code]||'حصل خطأ، حاول تاني';$('ab2').disabled=false}
+  };
+ }
+ else if(st.step==='home'){
   a.innerHTML=`<h2>هتتمرن النهاردة إيه؟</h2>
   <button class="big" data-g="u"><b>UPPER BODY</b><span>الجسم العلوي · صدر، ضهر، أكتاف، دراعات</span></button>
   <button class="big dark" data-g="l"><b>LOWER BODY</b><span>الجسم السفلي · رجل، سمانة، أسفل الضهر</span></button>
-  <div class="gl"></div><div class="row"><button class="btn o" id="hs">السجل والتصدير (${hist.length})</button></div>`;
+  <div class="gl"></div><div class="row"><button class="btn o" id="hs">السجل والتصدير (${hist.length})</button></div>
+  <div class="sub" style="text-align:center;margin-top:18px;direction:ltr">${esc(user?user.email:'')} · <a id="lo" style="color:var(--gold);cursor:pointer">تسجيل خروج</a></div>`;
+  $('lo').onclick=()=>auth.signOut();
   a.querySelectorAll('[data-g]').forEach(x=>x.onclick=()=>go('variant',{g:x.dataset.g}));
   $('hs').onclick=()=>go('hist');
  }
@@ -112,7 +137,7 @@ function render(){
   h+=`<div class="add"><input class="n" id="an" placeholder="Add exercise"><input class="s" id="as" type="number" value="3" min="1"><button class="btn" id="ab">+</button></div>`;
   a.innerHTML=h;
   $('bk').onclick=()=>go('variant');
-  $('ab').onclick=()=>{const n=$('an').value.trim();if(!n)return;(custom[k]=custom[k]||[]).push([n,Math.max(1,+$('as').value||3)]);ls.set('il_custom',custom);go('log',{})};
+  $('ab').onclick=()=>{const n=$('an').value.trim();if(!n)return;(custom[k]=custom[k]||[]).push([n,Math.max(1,+$('as').value||3)]);persist();go('log',{})};
   a.querySelectorAll('.set input').forEach(inp=>inp.oninput=()=>{
    const key=inp.dataset.i+'_'+inp.dataset.s;(st.cur[key]=st.cur[key]||{})[inp.dataset.f]=inp.value;
    cmp(+inp.dataset.i,L);
@@ -151,7 +176,7 @@ function render(){
   `<div class="row"><button class="btn" id="d1">تحميل شيت اليوم ده</button><button class="btn o" id="dx">حذف التمرين</button></div>`;
   $('bk').onclick=()=>go('hist');
   $('d1').onclick=()=>dl(s.date,st.n);
-  $('dx').onclick=()=>{if(!st.del){st.del=true;$('dx').textContent='اضغط تاني للتأكيد';return}hist.splice(st.n,1);ls.set('il_hist',hist);go('hist')};
+  $('dx').onclick=()=>{if(!st.del){st.del=true;$('dx').textContent='اضغط تاني للتأكيد';return}hist.splice(st.n,1);persist();go('hist')};
  }
 }
 function cmp(i,L){
@@ -165,7 +190,7 @@ function save(){
  L.forEach((e,i)=>{for(let s=0;s<e[1];s++){const c=st.cur[i+'_'+s];if(c&&(c.w||c.r))rows.push({ex:e[0],set:s+1,w:c.w||'',r:c.r||''})}});
  if(!rows.length){toast('اكتب وزن أو عدّات الأول');return}
  const sess={date:today(),day:k,label:PLAN[k].t+' - '+(st.g==='u'?'Upper':'Lower'),rows};
- hist.unshift(sess);ls.set('il_hist',hist);
+ hist.unshift(sess);persist();
  go('done',{last:sess});dl(sess.date);
 }
 function sheet(rows){
@@ -197,7 +222,20 @@ async function shareFile(date){
   else toast('المشاركة غير مدعومة، استخدم التحميل');
  }catch(e){}
 }
-render();
+$('app').innerHTML='<div class="sub" style="text-align:center">جاري التحميل...</div>';
+if(CFG.apiKey.indexOf('PASTE')!==0){
+ firebase.initializeApp(CFG);auth=firebase.auth();fdb=firebase.firestore();
+ auth.onAuthStateChanged(async u=>{
+  user=u;
+  if(!u){hist=[];custom={};go('auth',{mode:'login'});return}
+  try{
+   const d=await fdb.collection('users').doc(u.uid).get();
+   if(d.exists){hist=JSON.parse(d.data().hist||'[]');custom=JSON.parse(d.data().custom||'{}')}
+   else{hist=ls.get('il_hist',[]);custom=ls.get('il_custom',{});await persist();try{localStorage.removeItem('il_hist');localStorage.removeItem('il_custom')}catch(e){}}
+  }catch(e){toast('تعذر تحميل بياناتك')}
+  if(!email)email=u.email;go('home');
+ });
+}else go('auth',{mode:'login'});
 </script>
 </body>
 </html>
